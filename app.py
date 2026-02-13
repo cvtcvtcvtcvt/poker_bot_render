@@ -1,6 +1,6 @@
 """
 ПОЛНЫЙ КОД БОТА ДЛЯ RENDER.COM
-Версия: 1.0
+Версия: 2.0 - ИСПРАВЛЕНА ОШИБКА ПОТОКОВ
 Описание: Покерный бот SNAP DONK POKER KLUB с регистрацией, админ-панелью и управлением админами
 Flask-сервер для поддержания работы на бесплатном тарифе Render
 """
@@ -11,7 +11,6 @@ import sys
 import json
 import logging
 import threading
-import asyncio
 import sqlite3
 from datetime import datetime
 from flask import Flask, jsonify
@@ -44,6 +43,7 @@ ADMINS_FILE = "bot_admins.json"
 BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not BOT_TOKEN:
     logger.error("❌ TELEGRAM_TOKEN не найден в переменных окружения!")
+    logger.error("Добавьте переменную TELEGRAM_TOKEN в настройках Render")
     sys.exit(1)
 
 # ============ НАСТРОЙКИ ПО УМОЛЧАНИЮ ============
@@ -60,7 +60,7 @@ DEFAULT_SETTINGS = {
 
 # ============ ГЛАВНЫЙ АДМИН ============
 # 🔴 ВАЖНО: УКАЖИТЕ СВОЙ TELEGRAM ID ЗДЕСЬ!
-SUPER_ADMIN_ID = 123456789  # ЗАМЕНИТЕ НА СВОЙ ID!
+SUPER_ADMIN_ID = 1043425588  # ЗАМЕНИТЕ НА СВОЙ ID!
 
 # ============ ФУНКЦИИ ДЛЯ РАБОТЫ С АДМИНАМИ ============
 def load_admins():
@@ -143,11 +143,11 @@ def update_club_info(**kwargs):
         if key in settings:
             settings[key] = value
     save_settings(settings)
-
+    
     # Обновляем глобальные переменные
     global CLUB_NAME, RULES_URL, TOURNAMENT_DATE, TOURNAMENT_TIME
     global TOURNAMENT_BUYIN, TOURNAMENT_LOCATION, CLUB_DESCRIPTION, CONTACT_INFO
-
+    
     CLUB_NAME = settings["club_name"]
     RULES_URL = settings["rules_url"]
     TOURNAMENT_DATE = settings["tournament_date"]
@@ -156,7 +156,7 @@ def update_club_info(**kwargs):
     TOURNAMENT_LOCATION = settings["tournament_location"]
     CLUB_DESCRIPTION = settings["club_description"]
     CONTACT_INFO = settings["contact_info"]
-
+    
     return settings
 
 # Загружаем настройки
@@ -173,12 +173,12 @@ CONTACT_INFO = _settings["contact_info"]
 # ============ БАЗА ДАННЫХ ============
 class Database:
     """Работа с базой данных SQLite"""
-
+    
     def __init__(self):
         self.conn = sqlite3.connect('poker.db', check_same_thread=False)
         self.cursor = self.conn.cursor()
         self.create_table()
-
+    
     def create_table(self):
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS registrations (
@@ -194,7 +194,7 @@ class Database:
             )
         ''')
         self.conn.commit()
-
+    
     def add_registration(self, user_id, username, full_name, birth_date, nickname, agreed=True):
         reg_date = datetime.now().strftime("%d.%m.%Y %H:%M")
         try:
@@ -208,19 +208,19 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка БД: {e}")
             return False
-
+    
     def get_registration(self, user_id):
         self.cursor.execute('SELECT * FROM registrations WHERE user_id = ?', (user_id,))
         return self.cursor.fetchone()
-
+    
     def get_all_registrations(self):
         self.cursor.execute('SELECT * FROM registrations ORDER BY created_at DESC')
         return self.cursor.fetchall()
-
+    
     def check_registered(self, user_id):
         self.cursor.execute('SELECT user_id FROM registrations WHERE user_id = ?', (user_id,))
         return self.cursor.fetchone() is not None
-
+    
     def get_registration_count(self):
         self.cursor.execute('SELECT COUNT(*) FROM registrations')
         return self.cursor.fetchone()[0]
@@ -423,7 +423,7 @@ dp = Dispatcher(storage=storage)
 async def cmd_start(message: types.Message):
     """Приветствие и главное меню"""
     user_name = message.from_user.first_name
-
+    
     welcome_text = f"""
 🎰 <b>ДОБРО ПОЖАЛОВАТЬ В {CLUB_NAME}!</b> 🎰
 
@@ -438,13 +438,13 @@ async def cmd_start(message: types.Message):
 <b>Выбери действие в меню ниже:</b>
 👇👇👇
     """
-
+    
     await message.answer(
         welcome_text,
         reply_markup=get_start_keyboard(),
         parse_mode="HTML"
     )
-
+    
     logger.info(f"User @{message.from_user.username} ({message.from_user.id}) started bot")
 
 # ---------- ИНФОРМАЦИЯ О КЛУБЕ ----------
@@ -489,7 +489,7 @@ async def about_club(callback: types.CallbackQuery):
 
 📞 <b>Контакты:</b> {CONTACT_INFO}
     """
-
+    
     await callback.message.answer(
         text,
         reply_markup=get_start_keyboard(),
@@ -502,7 +502,7 @@ async def about_club(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "register")
 async def start_registration(callback: types.CallbackQuery, state: FSMContext):
     """Запуск процесса регистрации"""
-
+    
     if db.check_registered(callback.from_user.id):
         await callback.message.answer(
             "⚠️ <b>Вы уже зарегистрированы на турнир!</b>\n\n"
@@ -513,7 +513,7 @@ async def start_registration(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.answer()
         return
-
+    
     await callback.message.answer(
         "📝 <b>РЕГИСТРАЦИЯ НА ТУРНИР</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
@@ -524,7 +524,7 @@ async def start_registration(callback: types.CallbackQuery, state: FSMContext):
         "❗️ Минимум: Имя и Фамилия",
         parse_mode="HTML"
     )
-
+    
     await state.set_state(Registration.full_name)
     await callback.answer()
 
@@ -532,10 +532,10 @@ async def start_registration(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(Registration.full_name)
 async def process_full_name(message: types.Message, state: FSMContext):
     """Принимает и валидирует ФИО"""
-
+    
     full_name = message.text.strip()
     words = full_name.split()
-
+    
     if len(words) < 2:
         await message.answer(
             "❌ <b>Ошибка ввода</b>\n\n"
@@ -545,9 +545,9 @@ async def process_full_name(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
         return
-
+    
     await state.update_data(full_name=full_name)
-
+    
     await message.answer(
         "📅 <b>Шаг 2 из 4</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -557,25 +557,25 @@ async def process_full_name(message: types.Message, state: FSMContext):
         "⚠️ <b>Важно:</b> Регистрация доступна только с 18 лет",
         parse_mode="HTML"
     )
-
+    
     await state.set_state(Registration.birth_date)
 
 # ---------- ОБРАБОТКА ДАТЫ РОЖДЕНИЯ ----------
 @dp.message(Registration.birth_date)
 async def process_birth_date(message: types.Message, state: FSMContext):
     """Принимает и валидирует дату рождения"""
-
+    
     date_text = message.text.strip()
-
+    
     try:
         day, month, year = map(int, date_text.split('.'))
         birth_date = datetime(year, month, day)
-
+        
         today = datetime.now()
         age = today.year - birth_date.year
         if (today.month, today.day) < (birth_date.month, birth_date.day):
             age -= 1
-
+        
         if age < 18:
             await message.answer(
                 "❌ <b>Регистрация недоступна</b>\n\n"
@@ -584,7 +584,7 @@ async def process_birth_date(message: types.Message, state: FSMContext):
                 parse_mode="HTML"
             )
             return
-
+            
     except (ValueError, IndexError):
         await message.answer(
             "❌ <b>Неверный формат даты</b>\n\n"
@@ -594,9 +594,9 @@ async def process_birth_date(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
         return
-
+    
     await state.update_data(birth_date=date_text)
-
+    
     await message.answer(
         "🎭 <b>Шаг 3 из 4</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -606,16 +606,16 @@ async def process_birth_date(message: types.Message, state: FSMContext):
         "❗️ Минимум 2 символа",
         parse_mode="HTML"
     )
-
+    
     await state.set_state(Registration.nickname)
 
 # ---------- ОБРАБОТКА ПОКЕРНОГО НИКА ----------
 @dp.message(Registration.nickname)
 async def process_nickname(message: types.Message, state: FSMContext):
     """Принимает и валидирует покерный псевдоним"""
-
+    
     nickname = message.text.strip()
-
+    
     if len(nickname) < 2:
         await message.answer(
             "❌ <b>Слишком короткий ник</b>\n\n"
@@ -624,7 +624,7 @@ async def process_nickname(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
         return
-
+    
     forbidden_chars = '@#$%^&*()+='
     if any(char in nickname for char in forbidden_chars):
         await message.answer(
@@ -635,9 +635,9 @@ async def process_nickname(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
         return
-
+    
     await state.update_data(nickname=nickname)
-
+    
     agreement_text = f"""
 ⚖️ <b>Шаг 4 из 4 - ПОДТВЕРЖДЕНИЕ ПРАВИЛ</b>
 
@@ -652,7 +652,7 @@ async def process_nickname(message: types.Message, state: FSMContext):
 🔗 <a href="{RULES_URL}">📜 ОТКРЫТЬ РЕГЛАМЕНТ</a>
 ━━━━━━━━━━━━━━━━━━━━━
     """
-
+    
     await message.answer(
         agreement_text,
         reply_markup=get_agreement_keyboard(),
@@ -665,10 +665,10 @@ async def process_nickname(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "agree")
 async def process_agreement(callback: types.CallbackQuery, state: FSMContext):
     """Подтверждение согласия с регламентом"""
-
+    
     await state.update_data(agreed=True)
     data = await state.get_data()
-
+    
     preview_text = f"""
 ✅ <b>ПРОВЕРЬТЕ ВВЕДЕННЫЕ ДАННЫЕ:</b>
 
@@ -682,7 +682,7 @@ async def process_agreement(callback: types.CallbackQuery, state: FSMContext):
 
 <b>Всё верно?</b>
     """
-
+    
     await callback.message.answer(
         preview_text,
         reply_markup=get_confirm_keyboard(),
@@ -695,7 +695,7 @@ async def process_agreement(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "cancel")
 async def cancel_registration(callback: types.CallbackQuery, state: FSMContext):
     """Отмена регистрации"""
-
+    
     await state.clear()
     await callback.message.answer(
         "❌ <b>Регистрация отменена</b>\n\n"
@@ -709,9 +709,9 @@ async def cancel_registration(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "confirm")
 async def confirm_registration(callback: types.CallbackQuery, state: FSMContext):
     """Финализация регистрации"""
-
+    
     data = await state.get_data()
-
+    
     success = db.add_registration(
         user_id=callback.from_user.id,
         username=callback.from_user.username,
@@ -719,10 +719,10 @@ async def confirm_registration(callback: types.CallbackQuery, state: FSMContext)
         birth_date=data.get('birth_date'),
         nickname=data.get('nickname')
     )
-
+    
     if success:
         reg_time = datetime.now().strftime("%d.%m.%Y %H:%M")
-
+        
         final_text = f"""
 🎉 <b>РЕГИСТРАЦИЯ УСПЕШНО ЗАВЕРШЕНА!</b> 🎉
 
@@ -748,13 +748,13 @@ async def confirm_registration(callback: types.CallbackQuery, state: FSMContext)
 
 🃏 <b>Желаем удачи!</b> ♠️♥️♦️♣️
         """
-
+        
         await callback.message.answer(
             final_text,
             parse_mode="HTML",
             reply_markup=get_start_keyboard()
         )
-
+        
         # Уведомление админов
         for admin_id in ADMIN_IDS:
             try:
@@ -769,7 +769,7 @@ async def confirm_registration(callback: types.CallbackQuery, state: FSMContext)
                 )
             except:
                 pass
-
+        
         logger.info(f"New registration: {data.get('full_name')}")
     else:
         await callback.message.answer(
@@ -778,7 +778,7 @@ async def confirm_registration(callback: types.CallbackQuery, state: FSMContext)
             parse_mode="HTML",
             reply_markup=get_start_keyboard()
         )
-
+    
     await state.clear()
     await callback.answer()
 
@@ -786,9 +786,9 @@ async def confirm_registration(callback: types.CallbackQuery, state: FSMContext)
 @dp.callback_query(F.data == "my_data")
 async def show_my_data(callback: types.CallbackQuery):
     """Показывает данные пользователя"""
-
+    
     registration = db.get_registration(callback.from_user.id)
-
+    
     if not registration:
         await callback.message.answer(
             "❌ <b>Вы ещё не зарегистрированы</b>\n\n"
@@ -798,7 +798,7 @@ async def show_my_data(callback: types.CallbackQuery):
         )
     else:
         (_, _, _, full_name, birth_date, nickname, reg_date, _, _) = registration
-
+        
         text = f"""
 📋 <b>ВАША РЕГИСТРАЦИЯ:</b>
 
@@ -813,28 +813,28 @@ async def show_my_data(callback: types.CallbackQuery):
 
 📜 <a href="{RULES_URL}">Открыть регламент</a>
         """
-
+        
         await callback.message.answer(
             text,
             parse_mode="HTML",
             reply_markup=get_start_keyboard(),
             disable_web_page_preview=True
         )
-
+    
     await callback.answer()
 
 # ---------- АДМИН-ПАНЕЛЬ ----------
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
     """Панель администратора"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ <b>Доступ запрещен</b>", parse_mode="HTML")
         return
-
+    
     stats = db.get_all_registrations()
     is_super = is_super_admin(message.from_user.id)
-
+    
     text = f"""
 🔐 <b>ПАНЕЛЬ АДМИНИСТРАТОРА</b>
 ━━━━━━━━━━━━━━━━━━━━━
@@ -852,7 +852,7 @@ async def admin_panel(message: types.Message):
 <b>Бай-ин:</b> {TOURNAMENT_BUYIN}
 ━━━━━━━━━━━━━━━━━━━━━
     """
-
+    
     await message.answer(
         text,
         reply_markup=get_admin_main_keyboard(is_super),
@@ -870,11 +870,11 @@ async def back_to_start(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_edit_menu")
 async def admin_edit_menu(callback: types.CallbackQuery):
     """Меню редактирования информации"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "✏️ <b>РЕДАКТИРОВАНИЕ ИНФОРМАЦИИ</b>\n\n"
         "Выберите, что хотите изменить:",
@@ -887,11 +887,11 @@ async def admin_edit_menu(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_manage")
 async def admin_manage(callback: types.CallbackQuery):
     """Меню управления администраторами"""
-
+    
     if not is_super_admin(callback.from_user.id):
         await callback.answer("⛔ Только главный админ может управлять админами!", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "👥 <b>УПРАВЛЕНИЕ АДМИНИСТРАТОРАМИ</b>",
         reply_markup=get_admin_management_keyboard(),
@@ -903,26 +903,26 @@ async def admin_manage(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_list_admins")
 async def admin_list_admins(callback: types.CallbackQuery):
     """Показывает список всех администраторов"""
-
+    
     if not is_super_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     admins = load_admins()
-
+    
     text = "👥 <b>СПИСОК АДМИНИСТРАТОРОВ:</b>\n\n"
     text += f"👑 <b>Главный админ:</b> <code>{SUPER_ADMIN_ID}</code>\n\n"
     text += "<b>Администраторы:</b>\n"
-
+    
     admin_list = [admin_id for admin_id in admins if admin_id != SUPER_ADMIN_ID]
     if admin_list:
         for i, admin_id in enumerate(admin_list, 1):
             text += f"{i}. <code>{admin_id}</code>\n"
     else:
         text += "Нет других администраторов\n"
-
+    
     text += f"\nВсего админов: {len(admins)}"
-
+    
     await callback.message.answer(
         text,
         parse_mode="HTML",
@@ -934,11 +934,11 @@ async def admin_list_admins(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_add")
 async def admin_add(callback: types.CallbackQuery, state: FSMContext):
     """Добавление администратора"""
-
+    
     if not is_super_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "➕ <b>ДОБАВЛЕНИЕ АДМИНИСТРАТОРА</b>\n\n"
         "Введите Telegram ID пользователя:\n\n"
@@ -952,15 +952,15 @@ async def admin_add(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminManagement.waiting_for_new_admin_id)
 async def process_add_admin(message: types.Message, state: FSMContext):
     """Обработка добавления админа"""
-
+    
     if not is_super_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     try:
         new_admin_id = int(message.text.strip())
-
+        
         if new_admin_id == SUPER_ADMIN_ID:
             await message.answer(
                 "❌ Это главный администратор!",
@@ -992,21 +992,21 @@ async def process_add_admin(message: types.Message, state: FSMContext):
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     await state.clear()
 
 # ---------- УДАЛЕНИЕ АДМИНА ----------
 @dp.callback_query(F.data == "admin_remove")
 async def admin_remove(callback: types.CallbackQuery, state: FSMContext):
     """Удаление администратора"""
-
+    
     if not is_super_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     admins = load_admins()
     admin_list = [admin_id for admin_id in admins if admin_id != SUPER_ADMIN_ID]
-
+    
     if not admin_list:
         await callback.message.answer(
             "❌ Нет других администраторов для удаления.",
@@ -1014,9 +1014,9 @@ async def admin_remove(callback: types.CallbackQuery, state: FSMContext):
         )
         await callback.answer()
         return
-
+    
     admins_text = "\n".join([f"• <code>{admin_id}</code>" for admin_id in admin_list])
-
+    
     await callback.message.answer(
         "➖ <b>УДАЛЕНИЕ АДМИНИСТРАТОРА</b>\n\n"
         f"<b>Текущие администраторы:</b>\n{admins_text}\n\n"
@@ -1030,15 +1030,15 @@ async def admin_remove(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminManagement.waiting_for_remove_admin_id)
 async def process_remove_admin(message: types.Message, state: FSMContext):
     """Обработка удаления админа"""
-
+    
     if not is_super_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     try:
         remove_id = int(message.text.strip())
-
+        
         if remove_id == SUPER_ADMIN_ID:
             await message.answer(
                 "❌ Невозможно удалить главного администратора!",
@@ -1070,18 +1070,18 @@ async def process_remove_admin(message: types.Message, state: FSMContext):
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     await state.clear()
 
 # ---------- РЕДАКТИРОВАНИЕ НАЗВАНИЯ КЛУБА ----------
 @dp.callback_query(F.data == "admin_edit_club_name")
 async def admin_edit_club_name(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование названия клуба"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "🏆 <b>ИЗМЕНЕНИЕ НАЗВАНИЯ КЛУБА</b>\n\n"
         f"Текущее: <b>{CLUB_NAME}</b>\n\n"
@@ -1095,14 +1095,14 @@ async def admin_edit_club_name(callback: types.CallbackQuery, state: FSMContext)
 @dp.message(AdminEdit.waiting_for_club_name)
 async def process_new_club_name(message: types.Message, state: FSMContext):
     """Обработка нового названия клуба"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_name = message.text.strip()
-
+    
     if len(new_name) < 3:
         await message.answer(
             "❌ Слишком короткое название. Минимум 3 символа.\n"
@@ -1110,9 +1110,9 @@ async def process_new_club_name(message: types.Message, state: FSMContext):
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(club_name=new_name)
-
+    
     await message.answer(
         f"✅ <b>Название клуба обновлено!</b>\n\nНовое название: <b>{new_name}</b>",
         parse_mode="HTML",
@@ -1124,11 +1124,11 @@ async def process_new_club_name(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_edit_rules")
 async def admin_edit_rules(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование ссылки на регламент"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "🔗 <b>ИЗМЕНЕНИЕ ССЫЛКИ НА РЕГЛАМЕНТ</b>\n\n"
         f"Текущая ссылка:\n<code>{RULES_URL}</code>\n\n"
@@ -1143,23 +1143,23 @@ async def admin_edit_rules(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminEdit.waiting_for_rules_url)
 async def process_new_rules_url(message: types.Message, state: FSMContext):
     """Обработка новой ссылки на регламент"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_url = message.text.strip()
-
+    
     if not (new_url.startswith('http://') or new_url.startswith('https://')):
         await message.answer(
             "❌ Ссылка должна начинаться с http:// или https://",
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(rules_url=new_url)
-
+    
     await message.answer(
         "✅ <b>Ссылка на регламент обновлена!</b>",
         parse_mode="HTML",
@@ -1171,11 +1171,11 @@ async def process_new_rules_url(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_edit_date")
 async def admin_edit_date(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование даты турнира"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "📅 <b>ИЗМЕНЕНИЕ ДАТЫ ТУРНИРА</b>\n\n"
         f"Текущая дата: <b>{TOURNAMENT_DATE}</b>\n\n"
@@ -1190,23 +1190,23 @@ async def admin_edit_date(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminEdit.waiting_for_tournament_date)
 async def process_new_date(message: types.Message, state: FSMContext):
     """Обработка новой даты турнира"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_date = message.text.strip()
-
+    
     if len(new_date) < 5:
         await message.answer(
             "❌ Слишком короткая дата",
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(tournament_date=new_date)
-
+    
     await message.answer(
         f"✅ <b>Дата турнира обновлена!</b>\n\nНовая дата: <b>{new_date}</b>",
         parse_mode="HTML",
@@ -1218,11 +1218,11 @@ async def process_new_date(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_edit_time")
 async def admin_edit_time(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование времени турнира"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "⏰ <b>ИЗМЕНЕНИЕ ВРЕМЕНИ ТУРНИРА</b>\n\n"
         f"Текущее время: <b>{TOURNAMENT_TIME}</b>\n\n"
@@ -1237,23 +1237,23 @@ async def admin_edit_time(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminEdit.waiting_for_tournament_time)
 async def process_new_time(message: types.Message, state: FSMContext):
     """Обработка нового времени турнира"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_time = message.text.strip()
-
+    
     if ':' not in new_time:
         await message.answer(
             "❌ Неверный формат. Используйте ЧЧ:ММ",
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(tournament_time=new_time)
-
+    
     await message.answer(
         f"✅ <b>Время турнира обновлено!</b>\n\nНовое время: <b>{new_time}</b>",
         parse_mode="HTML",
@@ -1265,11 +1265,11 @@ async def process_new_time(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_edit_buyin")
 async def admin_edit_buyin(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование бай-ина"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "💰 <b>ИЗМЕНЕНИЕ БАЙ-ИНА</b>\n\n"
         f"Текущий бай-ин: <b>{TOURNAMENT_BUYIN}</b>\n\n"
@@ -1284,23 +1284,23 @@ async def admin_edit_buyin(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminEdit.waiting_for_buyin)
 async def process_new_buyin(message: types.Message, state: FSMContext):
     """Обработка нового бай-ина"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_buyin = message.text.strip()
-
+    
     if len(new_buyin) < 2:
         await message.answer(
             "❌ Слишком короткое значение",
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(tournament_buyin=new_buyin)
-
+    
     await message.answer(
         f"✅ <b>Бай-ин обновлен!</b>\n\nНовый бай-ин: <b>{new_buyin}</b>",
         parse_mode="HTML",
@@ -1312,11 +1312,11 @@ async def process_new_buyin(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_edit_location")
 async def admin_edit_location(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование места проведения"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "📍 <b>ИЗМЕНЕНИЕ МЕСТА ПРОВЕДЕНИЯ</b>\n\n"
         f"Текущее место: <b>{TOURNAMENT_LOCATION}</b>\n\n"
@@ -1330,23 +1330,23 @@ async def admin_edit_location(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminEdit.waiting_for_location)
 async def process_new_location(message: types.Message, state: FSMContext):
     """Обработка нового места проведения"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_location = message.text.strip()
-
+    
     if len(new_location) < 5:
         await message.answer(
             "❌ Слишком короткое название",
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(tournament_location=new_location)
-
+    
     await message.answer(
         f"✅ <b>Место проведения обновлено!</b>\n\nНовое место: <b>{new_location}</b>",
         parse_mode="HTML",
@@ -1358,11 +1358,11 @@ async def process_new_location(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_edit_description")
 async def admin_edit_description(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование описания клуба"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "📝 <b>ИЗМЕНЕНИЕ ОПИСАНИЯ КЛУБА</b>\n\n"
         f"Текущее описание:\n<i>{CLUB_DESCRIPTION}</i>\n\n"
@@ -1376,23 +1376,23 @@ async def admin_edit_description(callback: types.CallbackQuery, state: FSMContex
 @dp.message(AdminEdit.waiting_for_description)
 async def process_new_description(message: types.Message, state: FSMContext):
     """Обработка нового описания клуба"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_description = message.text.strip()
-
+    
     if len(new_description) < 10:
         await message.answer(
             "❌ Слишком короткое описание. Минимум 10 символов.",
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(club_description=new_description)
-
+    
     await message.answer(
         "✅ <b>Описание клуба обновлено!</b>",
         parse_mode="HTML",
@@ -1404,11 +1404,11 @@ async def process_new_description(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_edit_contact")
 async def admin_edit_contact(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование контактной информации"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     await callback.message.answer(
         "📞 <b>ИЗМЕНЕНИЕ КОНТАКТНОЙ ИНФОРМАЦИИ</b>\n\n"
         f"Текущие контакты: <b>{CONTACT_INFO}</b>\n\n"
@@ -1422,23 +1422,23 @@ async def admin_edit_contact(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AdminEdit.waiting_for_contact)
 async def process_new_contact(message: types.Message, state: FSMContext):
     """Обработка новой контактной информации"""
-
+    
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещен")
         await state.clear()
         return
-
+    
     new_contact = message.text.strip()
-
+    
     if len(new_contact) < 3:
         await message.answer(
             "❌ Слишком короткие контактные данные",
             reply_markup=get_cancel_keyboard()
         )
         return
-
+    
     update_club_info(contact_info=new_contact)
-
+    
     await message.answer(
         f"✅ <b>Контакты обновлены!</b>\n\nНовые контакты: <b>{new_contact}</b>",
         parse_mode="HTML",
@@ -1450,14 +1450,14 @@ async def process_new_contact(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "admin_back")
 async def admin_back(callback: types.CallbackQuery):
     """Возврат в админ-панель"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     stats = db.get_all_registrations()
     is_super = is_super_admin(callback.from_user.id)
-
+    
     text = f"""
 🔐 <b>ПАНЕЛЬ АДМИНИСТРАТОРА</b>
 ━━━━━━━━━━━━━━━━━━━━━
@@ -1468,7 +1468,7 @@ async def admin_back(callback: types.CallbackQuery):
 {'👑 <b>РОЛЬ:</b> ГЛАВНЫЙ АДМИН' if is_super else '👤 <b>РОЛЬ:</b> АДМИН'}
 ━━━━━━━━━━━━━━━━━━━━━
     """
-
+    
     await callback.message.answer(
         text,
         reply_markup=get_admin_main_keyboard(is_super),
@@ -1480,7 +1480,7 @@ async def admin_back(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_cancel")
 async def admin_cancel(callback: types.CallbackQuery, state: FSMContext):
     """Отмена редактирования"""
-
+    
     await state.clear()
     await callback.message.answer(
         "❌ Действие отменено",
@@ -1493,13 +1493,13 @@ async def admin_cancel(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "admin_list")
 async def admin_list(callback: types.CallbackQuery):
     """Показывает список всех зарегистрированных игроков"""
-
+    
     if not is_admin(callback.from_user.id):
         await callback.answer("⛔ Доступ запрещен", show_alert=True)
         return
-
+    
     registrations = db.get_all_registrations()
-
+    
     if not registrations:
         await callback.message.answer(
             "📭 <b>Нет зарегистрированных игроков</b>",
@@ -1508,9 +1508,9 @@ async def admin_list(callback: types.CallbackQuery):
         )
         await callback.answer()
         return
-
+    
     text = "📋 <b>ВСЕ РЕГИСТРАЦИИ:</b>\n\n"
-
+    
     for i, reg in enumerate(registrations[:10], 1):
         (_, _, username, full_name, _, nickname, reg_date, _, _) = reg
         text += f"<b>{i}.</b> {full_name}\n"
@@ -1518,9 +1518,9 @@ async def admin_list(callback: types.CallbackQuery):
         text += f"   📅 {reg_date}\n"
         text += f"   🆔 @{username if username else 'нет'}\n"
         text += "━━━━━━━━━━━\n"
-
+    
     text += f"\n<i>Всего: {len(registrations)}</i>"
-
+    
     await callback.message.answer(
         text,
         parse_mode="HTML",
@@ -1533,7 +1533,7 @@ async def admin_list(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_export")
 async def export_registrations(message_or_callback):
     """Экспорт регистраций в текстовый файл"""
-
+    
     if isinstance(message_or_callback, types.CallbackQuery):
         callback = message_or_callback
         message = callback.message
@@ -1542,21 +1542,21 @@ async def export_registrations(message_or_callback):
     else:
         message = message_or_callback
         user_id = message.from_user.id
-
+    
     if not is_admin(user_id):
         await message.answer("⛔ Доступ запрещен")
         return
-
+    
     registrations = db.get_all_registrations()
-
+    
     if not registrations:
         await message.answer("📭 Нет зарегистрированных игроков")
         return
-
+    
     export_text = f"РЕГИСТРАЦИИ {CLUB_NAME}\n"
     export_text += f"Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
     export_text += "=" * 50 + "\n\n"
-
+    
     for i, reg in enumerate(registrations, 1):
         (_, user_id, username, full_name, birth_date, nickname, reg_date, _, _) = reg
         export_text += f"{i}. {full_name}\n"
@@ -1566,24 +1566,24 @@ async def export_registrations(message_or_callback):
         export_text += f"   Telegram: @{username if username else 'нет'}\n"
         export_text += f"   ID: {user_id}\n"
         export_text += "-" * 30 + "\n\n"
-
+    
     filename = f"registrations_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
     with open(filename, 'w', encoding='utf-8') as f:
         f.write(export_text)
-
+    
     with open(filename, 'rb') as f:
         await message.answer_document(
             types.BufferedInputFile(f.read(), filename=filename),
             caption=f"📊 Экспорт ({len(registrations)} игроков)"
         )
-
+    
     logger.info(f"Admin {message.from_user.id} exported {len(registrations)} registrations")
 
 # ---------- КОМАНДА HELP ----------
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     """Справка по командам бота"""
-
+    
     help_text = f"""
 ❓ <b>ПОМОЩЬ ПО БОТУ {CLUB_NAME}</b>
 
@@ -1602,7 +1602,7 @@ async def cmd_help(message: types.Message):
 ━━━━━━━━━━━━━━━━━━━━━
 📞 <b>Контакты:</b> {CONTACT_INFO}
     """
-
+    
     await message.answer(
         help_text,
         parse_mode="HTML",
@@ -1613,7 +1613,7 @@ async def cmd_help(message: types.Message):
 @dp.message()
 async def handle_unknown(message: types.Message):
     """Обработка неизвестных команд"""
-
+    
     await message.answer(
         "❓ <b>Я не понимаю эту команду</b>\n\n"
         "Используйте кнопки меню или /help",
@@ -1621,25 +1621,7 @@ async def handle_unknown(message: types.Message):
         reply_markup=get_start_keyboard()
     )
 
-# ============ ФУНКЦИЯ ЗАПУСКА БОТА ============
-async def run_bot():
-    """Запуск бота в бесконечном polling"""
-    try:
-        logger.info("🚀 Бот запускается на Render.com...")
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
-    except Exception as e:
-        logger.error(f"❌ Ошибка в боте: {e}")
-    finally:
-        await bot.session.close()
-
-def start_bot():
-    """Запуск бота в отдельном потоке"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_bot())
-
-# ============ FLASK ЭНДПОЙНТЫ ============
+# ============ ФЛЕСК ЭНДПОЙНТЫ ============
 @app.route('/')
 def index():
     """Главная страница - проверка работы"""
@@ -1656,13 +1638,35 @@ def health():
     """Health check для Render"""
     return jsonify({"status": "healthy"}), 200
 
+# ============ ИСПРАВЛЕННЫЙ ЗАПУСК БОТА ============
+def run_bot_sync():
+    """Синхронная обертка для запуска бота в отдельном потоке"""
+    import asyncio
+    
+    # Создаем новый event loop для этого потока
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    async def start():
+        try:
+            logger.info("🚀 Бот запускается на Render.com...")
+            # Удаляем вебхук перед стартом
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot)
+        except Exception as e:
+            logger.error(f"❌ Ошибка в боте: {e}")
+        finally:
+            await bot.session.close()
+    
+    loop.run_until_complete(start())
+
 # ============ ЗАПУСК ============
 if __name__ == "__main__":
     # Запускаем бота в фоновом потоке
-    bot_thread = threading.Thread(target=start_bot, daemon=True)
+    bot_thread = threading.Thread(target=run_bot_sync, daemon=True)
     bot_thread.start()
     logger.info("✅ Бот запущен в фоновом потоке")
-
+    
     # Запускаем Flask сервер
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"🌐 Flask сервер запущен на порту {port}")
