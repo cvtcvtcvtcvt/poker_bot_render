@@ -1,12 +1,13 @@
 """
 ПОКЕРНЫЙ БОТ ДЛЯ RENDER - РАБОЧАЯ ВЕРСИЯ НА WEBHOOKS
-Webhooks вместо polling - 100% совместимость с Render
+ИСПРАВЛЕНО: удален bot.username
 """
 
 import os
 import json
 import logging
 import sqlite3
+import asyncio
 from datetime import datetime
 from flask import Flask, request, jsonify
 from aiogram import Bot, Dispatcher, types, F
@@ -245,7 +246,7 @@ async def confirm_registration(callback: types.CallbackQuery, state: FSMContext)
             reply_markup=get_start_keyboard()
         )
         # Уведомление админу
-        if SUPER_ADMIN_ID != 123456789:
+        if SUPER_ADMIN_ID != 1043425588:
             try:
                 await bot.send_message(
                     SUPER_ADMIN_ID,
@@ -290,7 +291,7 @@ async def admin_panel(message: types.Message):
     count = db.get_registration_count()
     await message.answer(f"🔐 АДМИН-ПАНЕЛЬ\n\nВсего регистраций: {count}")
 
-# ============ WEBHOOKS - ГЛАВНОЕ ОТЛИЧИЕ! ============
+# ============ WEBHOOKS ============
 
 WEBHOOK_URL = f"https://poker-bot-render.onrender.com/webhook"
 
@@ -321,8 +322,7 @@ def health():
 
 @app.route('/set_webhook')
 def set_webhook():
-    """Устанавливаем вебхук (вызвать 1 раз)"""
-    import asyncio
+    """Устанавливаем вебхук"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
@@ -338,10 +338,8 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"🚀 Запуск на порту {port}")
     logger.info(f"🌐 Webhook URL: {WEBHOOK_URL}")
-    logger.info(f"🤖 Бот: @{bot.username}")
     
     # Устанавливаем вебхук при старте
-    import asyncio
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(bot.set_webhook(url=WEBHOOK_URL))
