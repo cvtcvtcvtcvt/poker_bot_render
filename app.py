@@ -1,6 +1,6 @@
 """
-ПОКЕРНЫЙ БОТ ДЛЯ RENDER - РАБОЧАЯ ВЕРСИЯ НА WEBHOOKS
-ИСПРАВЛЕНО: удален bot.username
+ПОКЕРНЫЙ БОТ ДЛЯ RENDER - ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ
+С ВАШИМ TELEGRAM ID: 1043425588
 """
 
 import os
@@ -34,8 +34,8 @@ if not BOT_TOKEN:
     logger.error("❌ TELEGRAM_TOKEN не найден!")
     exit(1)
 
-# 🔴 ВАШ TELEGRAM ID - ЗАМЕНИТЕ!
-SUPER_ADMIN_ID = 1043425588  # <--- ВАШ ID СЮДА!
+# ✅ ВАШ TELEGRAM ID!
+SUPER_ADMIN_ID = 1043425588
 
 # ============ НАСТРОЙКИ КЛУБА ============
 CLUB_NAME = "SNAP DONK POKER KLUB"
@@ -118,7 +118,7 @@ dp = Dispatcher(storage=storage)
 def get_start_keyboard():
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(
-        text="📝 РЕГИСТРАЦИЯ НА ТУРНИР",
+        text="📝 РЕГИСТРАЦИЯ",
         callback_data="register"
     ))
     builder.add(InlineKeyboardButton(
@@ -245,15 +245,14 @@ async def confirm_registration(callback: types.CallbackQuery, state: FSMContext)
             f"🎉 РЕГИСТРАЦИЯ ЗАВЕРШЕНА!\n\nЖелаем удачи!",
             reply_markup=get_start_keyboard()
         )
-        # Уведомление админу
-        if SUPER_ADMIN_ID != 1043425588:
-            try:
-                await bot.send_message(
-                    SUPER_ADMIN_ID,
-                    f"✅ Новая регистрация: {data.get('full_name')}"
-                )
-            except:
-                pass
+        # Уведомление админу (вам!)
+        try:
+            await bot.send_message(
+                SUPER_ADMIN_ID,
+                f"✅ Новая регистрация: {data.get('full_name')}"
+            )
+        except:
+            pass
     else:
         await callback.message.answer("❌ Ошибка", reply_markup=get_start_keyboard())
     
@@ -291,16 +290,23 @@ async def admin_panel(message: types.Message):
     count = db.get_registration_count()
     await message.answer(f"🔐 АДМИН-ПАНЕЛЬ\n\nВсего регистраций: {count}")
 
-# ============ WEBHOOKS ============
+# ============ WEBHOOK (СИНХРОННАЯ ВЕРСИЯ) ============
 
 WEBHOOK_URL = f"https://poker-bot-render.onrender.com/webhook"
 
 @app.route('/webhook', methods=['POST'])
-async def webhook():
-    """Принимаем обновления от Telegram"""
+def webhook():
+    """Синхронный обработчик webhook - без ошибок Flask!"""
     try:
-        update = Update.model_validate(request.get_json(), context={"bot": bot})
-        await dp.feed_update(bot, update)
+        update_data = request.get_json()
+        
+        # Создаем событийный цикл для асинхронного вызова
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        update = Update.model_validate(update_data, context={"bot": bot})
+        loop.run_until_complete(dp.feed_update(bot, update))
+        
         return '', 200
     except Exception as e:
         logger.error(f"Webhook error: {e}")
@@ -338,6 +344,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     logger.info(f"🚀 Запуск на порту {port}")
     logger.info(f"🌐 Webhook URL: {WEBHOOK_URL}")
+    logger.info(f"👑 Админ ID: {SUPER_ADMIN_ID}")
     
     # Устанавливаем вебхук при старте
     loop = asyncio.new_event_loop()
